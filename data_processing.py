@@ -28,7 +28,8 @@ def steering_vector_nearfield(theta, r, N, d, lam):
 
 def generate_nearfield_data(N, M, K, d, lam, thetas, rs, SNR_dB):
     """生成接收信号矩阵 Y"""
-    A = torch.stack([steering_vector_nearfield(thetas[m], rs[m], N, d, lam) for m in range(M)], dim=1) # 阵列流形矩阵 [N, M]
+    A = steering_vector_nearfield(thetas, rs, N, d, lam).unsqueeze(1)  # [N,1] (M=1)
+
     s = (torch.randn(M, K) + 1j * torch.randn(M, K)) / math.sqrt(2)  # 这里使用随机信号作为源信号矩阵 [M, K]
     y = A @ s # 接收信号矩阵 [N, K]
     # 添加噪声
@@ -58,8 +59,8 @@ def reconstruct_vcm(R):
             vcm += torch.diag(torch.full((N,), mean_val, dtype=R.dtype)) # 主对角线赋值
             continue
         # 计算 χl(t), χr(t)
-        chi_l_t = int(round(nc - t / 2))
-        chi_r_t = int(round(nc - (t - 1) / 2))
+        chi_l_t = math.floor(nc - t / 2)
+        chi_r_t = math.floor(nc - (t - 1) / 2)
 
         # 对称位置的索引 χl(-t), χr(-t)
         chi_l_neg_t = int(round(nc + t / 2))
@@ -101,8 +102,8 @@ def complex_to_tensor(Xc):
     X_imag = Xc.imag.T.unsqueeze(1)
     return torch.cat([X_real, X_imag], dim=1)
 
+'''
 #  主流程 
-
 Y = generate_nearfield_data(N, M, K, d, lam, theta_deg, r_vals, SNR_dB)
 R = sample_covariance(Y)
 R_vcm = reconstruct_vcm(R)
@@ -114,3 +115,68 @@ X_input = complex_to_tensor(Xi_s)
 print("Input tensor shape for CVNN:", X_input.shape)
 print("Example real part (first few):", X_input[0,0,:5])
 print("Example imag part (first few):", X_input[0,1,:5])
+'''
+
+#   生成数据集
+def generate_dataset(N, M, K, d, lam, SNR_dB, thetas, rs, Nin=33, verbose=True):
+    X_list = []
+    y_list = []
+
+    total = len(thetas) * len(rs)
+    count = 0
+
+    for r in rs: # 200λ-1800λ
+        for th in thetas: # -90°-90°
+            Y = generate_nearfield_data(N, M, K, d, lam, th, r, SNR_dB) # 生成接收信号矩阵
+            R = sample_covariance(Y) # 计算样本协方差矩阵
+            Rv = reconstruct_vcm(R) # 重构虚拟协方差矩阵
+            Rc = crop_matrix(Rv, Nin) # 中心裁剪
+            Xi = extract_signal_subspace(Rc, M) # 提取信号子空间
+            X = complex_to_tensor(Xi) # 转成实数tensor
+
+            X_list.append(X.unsqueeze(0)) # 这是输入 shape=[1, 2, Nin]
+            y_list.append([th, r])  # label = (theta, distance)
+
+            # ======== 打印进度 ========
+            count += 1
+
+            if verbose:
+                '''
+                # 方案 A：逐条打印
+                print(f"[{count}/{total}] θ={th:.2f}°, r={r/lam:.1f}λ 样本生成完成")
+                '''
+
+                # 方案 B：每 1000 条打印一次 
+                if count % 1000 == 0:
+                    print(f"[{count}/{total}] 生成中...")
+
+    X_data = torch.cat(X_list, dim=0)   # [num, 2, Nin] batch of inputs
+    y_data = torch.tensor(y_list, dtype=torch.float32)
+
+    return X_data, y_data
+
+
+
+# 训练集 / 测试集采样范围
+
+theta_train = np.arange(-45, 45.01, 0.01)
+theta_test  = np.arange(-45, 45.01, 0.1)
+r_vals = np.arange(200, 1800.1, 25) * lam
+
+# 生成训练集
+# 生成完整训练集
+thetas_sel = theta_train
+rs_sel = r_vals
+
+print("Generating training dataset...")
+print(f"θ范围: {len(thetas_sel)} 个角度样本")
+print(f"r范围: {len(rs_sel)} 个距离样本")
+print(f"总样本数: {len(thetas_sel) * len(rs_sel)}")
+
+X_train, y_train = generate_dataset(N, M, K, d, lam, 
+                                    SNR_dB, thetas_sel, rs_sel,Nin=33, verbose=True)
+
+print("Training dataset generated.")
+print("X_train shape:", X_train.shape)
+print("y_train shape:", y_train.shape)
+print("Example y_train (first 5):", y_train[:5])
