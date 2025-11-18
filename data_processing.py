@@ -164,7 +164,6 @@ theta_test  = np.arange(-45, 45.01, 0.1)
 r_vals = np.arange(200, 1800.1, 25) * lam
 
 # 生成训练集
-# 生成完整训练集
 thetas_sel = theta_train
 rs_sel = r_vals
 
@@ -180,3 +179,42 @@ print("Training dataset generated.")
 print("X_train shape:", X_train.shape)
 print("y_train shape:", y_train.shape)
 print("Example y_train (first 5):", y_train[:5])
+
+
+# 生成测试集
+print("Generating test dataset...")
+
+theta_test_sel = theta_test   # [-45,45] 每 0.1°
+rs_test_sel = rs_sel          # 与训练集一致
+
+print(f"θ范围: {len(theta_test_sel)} 个角度样本")
+print(f"r范围: {len(rs_test_sel)} 个距离样本")
+print(f"总样本数: {len(theta_test_sel) * len(rs_test_sel)}")
+
+X_test, y_test = generate_dataset(N, M, K, d, lam,
+                                  SNR_dB, theta_test_sel, rs_test_sel, Nin=33, verbose=True)
+
+print("Test dataset generated.")
+print("X_test shape:", X_test.shape)
+print("y_test shape:", y_test.shape)
+
+
+
+
+
+import os
+
+save_dir = "data"
+os.makedirs(save_dir, exist_ok=True)
+
+torch.save(X_train, os.path.join(save_dir, "X_train.pt"))
+torch.save(y_train, os.path.join(save_dir, "y_train.pt"))
+
+print("✔ Training data saved:")
+print(f"  - {os.path.join(save_dir, 'X_train.pt')}")
+print(f"  - {os.path.join(save_dir, 'y_train.pt')}")
+
+torch.save(X_test, os.path.join(save_dir, "X_test.pt"))
+torch.save(y_test, os.path.join(save_dir, "y_test.pt"))
+
+print("✔ Test data saved:")
