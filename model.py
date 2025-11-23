@@ -133,6 +133,8 @@ class ComplexResNet(nn.Module):
     def __init__(self, Nin):
         super().__init__()
 
+        self.expected_Nin = Nin
+
         # Residual Block 1: (3×1×8) + (3×8×8)
         self.res1 = ComplexResidualBlock(1, 8, 8, kernel=3)
         self.pool1 = nn.MaxPool1d(kernel_size=2, stride=2)
@@ -194,72 +196,81 @@ class ComplexResNet(nn.Module):
         x = self.fc3(x)
 
         return x.squeeze(-1)
+    
+
+if __name__ == "__main__":   
 
 
-# ---------------- load data ----------------
-def load_data(data_dir):
-    X_train = torch.load(os.path.join(data_dir, "X_train.pt"))
-    y_train = torch.load(os.path.join(data_dir, "y_train.pt"))
-    X_test = torch.load(os.path.join(data_dir, "X_test.pt"))
-    y_test = torch.load(os.path.join(data_dir, "y_test.pt"))
-    # X shape expected [N, 2, Nin]; y shape [N, 2] where second dim is [theta, r]
-    # We only predict angle; take theta in degrees -> convert to radians (paper uses radians inside)
-    # Paper trains on angle in radians within (-pi/2, pi/2); we will scale to radians.
-    # y_train[:,0] is theta degrees -> convert to radians
-    y_train_theta = torch.tensor(y_train[:,0], dtype=torch.float32) * math.pi / 180.0
-    y_test_theta = torch.tensor(y_test[:,0], dtype=torch.float32) * math.pi / 180.0
-    return X_train, y_train_theta, X_test, y_test_theta
+    # ---------------- load data ----------------
+    def load_data(data_dir):
+        X_train = torch.load(os.path.join(data_dir, "X_train.pt"))
+        y_train = torch.load(os.path.join(data_dir, "y_train.pt"))
+        X_test = torch.load(os.path.join(data_dir, "X_test.pt"))
+        y_test = torch.load(os.path.join(data_dir, "y_test.pt"))
 
-X_train, y_train_theta, X_test, y_test_theta = load_data(data_dir)
-print("Loaded dataset shapes:", X_train.shape, y_train_theta.shape, X_test.shape, y_test_theta.shape)
+        # [N, 1, 2, Nin] -> [N, 2, Nin]
+        if X_train.dim() == 4 and X_train.size(1) == 1:
+            X_train = X_train.squeeze(1)
+            X_test = X_test.squeeze(1)
 
-# create dataloaders
-train_dataset = TensorDataset(X_train, y_train_theta)
-test_dataset = TensorDataset(X_test, y_test_theta)
-train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=2, pin_memory=True)
-test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=2, pin_memory=True)
+        # X shape expected [N, 2, Nin]; y shape [N, 2] where second dim is [theta, r]
+        # We only predict angle; take theta in degrees -> convert to radians (paper uses radians inside)
+        # Paper trains on angle in radians within (-pi/2, pi/2); we will scale to radians.
+        # y_train[:,0] is theta degrees -> convert to radians
+        y_train_theta = torch.tensor(y_train[:,0], dtype=torch.float32) * math.pi / 180.0
+        y_test_theta = torch.tensor(y_test[:,0], dtype=torch.float32) * math.pi / 180.0
+        return X_train, y_train_theta, X_test, y_test_theta
 
-# ---------------- model, loss, optimizer ----------------
-model = ComplexResNet(Nin).to(device)
-# use MAE loss (paper says MAE performed better for small angle errors)
-criterion = nn.L1Loss()
-optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    X_train, y_train_theta, X_test, y_test_theta = load_data(data_dir)
+    print("Loaded dataset shapes:", X_train.shape, y_train_theta.shape, X_test.shape, y_test_theta.shape)
 
-# training loop
-best_val = 1e9
-for epoch in range(1, epochs+1):
-    model.train()
-    running_loss = 0.0
-    for xb, yb in train_loader:
-        xb = xb.to(device).float()
-        yb = yb.to(device).float()
+    # create dataloaders
+    train_dataset = TensorDataset(X_train, y_train_theta)
+    test_dataset = TensorDataset(X_test, y_test_theta)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0, pin_memory=True)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=0, pin_memory=True)
 
-        optimizer.zero_grad()
-        preds = model(xb)  # preds in radians
-        loss = criterion(preds, yb)
-        loss.backward()
-        optimizer.step()
-        running_loss += loss.item() * xb.size(0)
+    # ---------------- model, loss, optimizer ----------------
+    model = ComplexResNet(Nin).to(device)
+    # use MAE loss (paper says MAE performed better for small angle errors)
+    criterion = nn.L1Loss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
-    train_loss = running_loss / len(train_loader.dataset)
-
-    # validation
-    model.eval()
-    val_loss = 0.0
-    with torch.no_grad():
-        for xb, yb in test_loader:
+    # training loop
+    best_val = 1e9
+    for epoch in range(1, epochs+1):
+        model.train()
+        running_loss = 0.0
+        for xb, yb in train_loader:
             xb = xb.to(device).float()
             yb = yb.to(device).float()
-            preds = model(xb)
-            val_loss += criterion(preds, yb).item() * xb.size(0)
-    val_loss = val_loss / len(test_loader.dataset)
 
-    print(f"Epoch {epoch}/{epochs}  Train MAE (rad): {train_loss:.6f}   Val MAE (rad): {val_loss:.6f}")
+            optimizer.zero_grad()
+            preds = model(xb)  # preds in radians
+            loss = criterion(preds, yb)
+            loss.backward()
+            optimizer.step()
+            running_loss += loss.item() * xb.size(0)
 
-    # save best
-    if val_loss < best_val:
-        best_val = val_loss
-        torch.save(model.state_dict(), "best_complex_resnet.pth")
-        print("  -> saved best model")
+        train_loss = running_loss / len(train_loader.dataset)
 
-print("Training finished. Best val MAE (rad):", best_val)
+        # validation
+        model.eval()
+        val_loss = 0.0
+        with torch.no_grad():
+            for xb, yb in test_loader:
+                xb = xb.to(device).float()
+                yb = yb.to(device).float()
+                preds = model(xb)
+                val_loss += criterion(preds, yb).item() * xb.size(0)
+        val_loss = val_loss / len(test_loader.dataset)
+
+        print(f"Epoch {epoch}/{epochs}  Train MAE (rad): {train_loss:.6f}   Val MAE (rad): {val_loss:.6f}")
+
+        # save best
+        if val_loss < best_val:
+            best_val = val_loss
+            torch.save(model.state_dict(), "best_complex_resnet.pth")
+            print("  -> saved best model")
+
+    print("Training finished. Best val MAE (rad):", best_val)
