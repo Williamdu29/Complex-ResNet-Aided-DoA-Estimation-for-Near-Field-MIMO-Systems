@@ -407,18 +407,35 @@ for Nin_test in Nin_candidates:
         results_fig9b[(Nin_test, K_val)] = np.array(rmse_list)
 
 # ---- Plot ----
-plt.figure(figsize=(6,5))
-markers = ['o', 'o--', 'v', 'v--']
-for (key, marker) in zip(results_fig9b.keys(), markers):
+plt.figure(figsize=(6, 5))
+
+# 为每条曲线分别指定 marker 和 linestyle
+styles = [
+    ('o', '-'),   # Nin=33, K=64  圆点，实线
+    ('o', '--'),  # Nin=33, K=128 圆点，虚线
+    ('v', '-'),   # Nin=65, K=64  三角，实线
+    ('v', '--'),  # Nin=65, K=128 三角，虚线
+]
+
+for (key, (mk, ls)) in zip(results_fig9b.keys(), styles):
     Nin_test, K_val = key
-    label = f"Nin={Nin_test}, K={K_val}"
-    plt.plot(snr_list, results_fig9b[key], marker=marker[0], linestyle=marker[1:], label=label)
+    # 用 LaTeX 数学字体写成图里那种形式
+    label = rf"$N_{{in}}={Nin_test}, K={K_val}$"
+    plt.plot(
+        snr_list,
+        results_fig9b[key],
+        marker=mk,
+        linestyle=ls,
+        linewidth=2,
+        markersize=6,
+        label=label
+    )
 
 plt.xlabel("SNR (dB)")
 plt.ylabel("RMSE")
-plt.title("RMSE vs SNR for different Nin × K")
 plt.grid(True)
 plt.legend()
-plt.savefig(os.path.join(RESULTS_DIR, "RMSE_vs_SNR_multiNxK.png"), dpi=300) # dpi=300 for better quality
+plt.tight_layout()
+plt.savefig(os.path.join(RESULTS_DIR, "RMSE_vs_SNR_multiNxK.png"), dpi=300)
 print("Saved RMSE_vs_SNR_multiNxK.png")
 
